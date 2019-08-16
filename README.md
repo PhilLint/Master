@@ -4,6 +4,10 @@
   
 Solutions and implementation from [Philipp Lintl](https://github.com/PhilLint) and collaborators for group projects. 
 
+## Multi Agent Systems
+
+Code for the Reinforcement Learning part of the last assignment is found here [MAS assignment 6]https://github.com/Dirk94/mas-homework-6.
+
 ## Copyright
 
 Copyright © 2019 Philipp Lintl
