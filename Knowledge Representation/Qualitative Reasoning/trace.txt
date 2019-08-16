@@ -1,0 +1,27 @@
+###############################################################
+Qualitative Simulation algorithm for possible system behaviour
+###############################################################
+According to our Entity definition, all possible states are created
+All possible states are created as a list (valid and invalid) with a total of :39366
+  States not consistent with correspondences are deleted
+  States not consistent with system constraints and proportionalities are deleted
+  States not consistent with influences are deleted
+  Only valid states left. A total of: 24
+###############################################################
+
+Find parent and children nodes for graph by filling an adjacency list (state transitions)
+   Given: exogenous variable [inflow] with start derivative: [increasing]
+   Derive possible starting states based on exogenous derivative
+   Build adjacency list: which originally valid state is a neighbor to which other valid state
+   For every possible starting state (based on exogenous derivative), find possible following states
+       Gather instanteous (e.g. (0,+) -> (+,+)) and possibly changing quantities
+       Instanteous quantity possible: apply all instanteous changes to obtain a new state
+       Quantities are changed (instanteous and all possible combinations) according to derivatives
+   Possible children based on these transitions are added to adjacency_list
+All children for all possible start states are created, thus adjacency list is complete
+Adjacency list is transformed to graph format by changing entity objects to strings
+       Example: possibly changing quantity: outflow: (+,-)
+       Example: instanteous changing quantity: inflow: (0,+)
+
+       No instanteous quantity possible: create a list of every possible combination of changable quantities to explore
+       No instanteous quantity possible: apply according transitions to each combination and add original state as no transitions is an option as well
