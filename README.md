@@ -4,6 +4,14 @@
   
 Solutions and implementation from [Philipp Lintl](https://github.com/PhilLint) and collaborators for group projects. 
 
+## Multi Agent Systems
+
+Code for the Reinforcement Learning part of the last assignment is found here [MAS assignment 6](https://github.com/Dirk94/mas-homework-6).
+
+## Natural Language Processing 1
+
+Google Colab Notebook for the second assignment is found here: [Final Project Notebook](https://colab.research.google.com/drive/1QWoMLUdugiX1vO4tbCVzH47ly6msQ0XK) 
+
 ## Copyright
 
 Copyright © 2019 Philipp Lintl
