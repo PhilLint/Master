@@ -12,6 +12,10 @@ Code for the Reinforcement Learning part of the last assignment is found here [M
 
 Google Colab Notebook for the second assignment is found here: [Final Project Notebook](https://colab.research.google.com/drive/1QWoMLUdugiX1vO4tbCVzH47ly6msQ0XK) 
 
+## Knowledge Representation
+
+Was done in as a group project between me and [Luisa Ebner](https://github.com/LuisaEbner). 
+
 ## Copyright
 
 Copyright © 2019 Philipp Lintl
