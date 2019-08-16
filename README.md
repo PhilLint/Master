@@ -16,6 +16,10 @@ Google Colab Notebook for the second assignment is found here: [Final Project No
 
 Was done in as a group project between me and [Luisa Ebner](https://github.com/LuisaEbner). 
 
+## Data Mining 
+
+The Github Repository for the second Assignment is found [here](https://github.com/PhilLint/Expedia-Ranking-Competition). 
+
 ## Copyright
 
 Copyright © 2019 Philipp Lintl
