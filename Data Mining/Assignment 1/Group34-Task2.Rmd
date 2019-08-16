@@ -1,0 +1,494 @@
+---
+title: "DM Group 34"
+author: "Pl Le Fc"
+date: "4/18/2019"
+output:
+  html_document:
+    toc: TRUE
+    theme: readable
+---
+
+for this task, we chose mlr package in R, as it offers a modular structure, which allows to apply  various kinds of classifiers with numereous advanced techniques to be easily applied. We also use the tidyverse data format, as it allows for elegant handling of matrix computations not requiring loops but functions with the %<% pipeline. 
+
+For more information on the MLR package there exists a turorial: 
+[https://mlr-org.github.io/mlr-tutorial/release/html/index.html](https://mlr-org.github.io/mlr-tutorial/release/html/index.html)
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse) # data format / manipulation
+library(mlr)       # Best and most complete ML package 
+library(knitr)     # 
+library(xgboost)   # xgboost classifier
+library(randomForest) # random forest classifier
+library(gbm)
+library(ggplot2)
+library(data.table)
+```
+Load the datasets given on kaggle. 
+
+```{r load data, message=FALSE, warning=FALSE}
+train_raw <- read_csv("./train.csv")
+test_raw <- read_csv("./test.csv")
+```
+
+## Data Preprocessing - Cleaning / Overview
+
+Merging the train and test set eases the preprocessing steps as they only have to be applied on one object, which then can be reformatted thanks to an added column stating whether its data from the train or test set.
+
+```{r, message=FALSE, warning=FALSE}
+train <- train_raw %>% mutate(data = "train")
+test <- test_raw %>% mutate(data = "test")
+# same columns -> easily binded by row
+full_data <- bind_rows(train, test)
+```
+
+As mentioned above, the mlr package includes many handy features. First and foremost handling the ML tasks in a very handy framework. Furthermore, functions, such as `summarizeColumns()` allow for a first overview on the data:
+
+```{r, message=FALSE, warning=FALSE}
+full_data <- full_data %>% mutate_each(funs(factor), Survived, Pclass, Name, Sex, Ticket, Cabin, Embarked, SibSp, Parch)
+summarizeColumns(full_data) %>% kable(digits = 2)
+```
+
+A lot of missing values in the entire dataset. 
+
+```{r, message = FALSE, warning = FALSE}
+frequencies = full_data %>%  select(Survived,Pclass, Sex, Embarked, SibSp, Parch) %>% 
+  gather(.,"var","value") %>% count(var, value) 
+frequencies
+
+```
+
+61 % of the passengers did not survive, 342 did and also 418 unknowns. About two thirds of all passengers were male, most people had a third class ticket and also most people embarked in southhampton.  
+
+## Correlations / important features
+
+Difference in survival rate between men and women?
+
+```{r, message=F, warning=F}
+full_data %>% group_by(Sex) %>% summarise(prob = mean(as.integer(Survived)-1, na.rm=T)) %>% print()
+```
+Yes, only 18% of men survived, whereas 74% of women survived. 
+
+Difference in survival rate between Classes?
+
+```{r, message=F, warning=F}
+full_data %>% group_by(Pclass) %>% summarise(prob = mean(as.integer(Survived)-1, na.rm=T)) %>% print()
+```
+Yes, the lower the class, the higher the survival rate.
+
+Difference in survival rate between Classes?
+
+```{r, message=F, warning=F}
+full_data %>% group_by(Embarked) %>% summarise(prob = mean(as.integer(Survived)-1, na.rm=T)) %>% print()
+```
+
+Difference in survival rate between ages?
+
+```{r, message=F, warning=F}
+p1 <- full_data %>% filter(!is.na(Survived)) %>% ggplot(aes(Age,fill=Survived)) + geom_density(alpha=.5)
+
+p2 <- full_data %>% filter(!is.na(Survived)) %>% filter(Fare < 300) %>% ggplot(aes(Fare,fill=Survived)) + geom_density(alpha=.5)
+
+grid.arrange(p1,p2,nrow=1)
+```
+
+## Feature Engineering
+
+Too little data is a common problem for Data Analysis tasks, especially if there are many missing values as well. A way to deal with this in order to leverage the given observations for the most, a technique called Feature Engineering comes into play. 
+In other words, we try to get as much information as possible out of the given data, even if it means to change the variables.
+
+We start with the extraction of the Title of a person, which is derivable from the name. 
+
+```{r, message = F, warning = F}
+head(full_data$Name)
+# Names follow structure e.g. : xxx, MR., xxx 
+# -> delete everything before , and after . to get title
+full_data$Title <- gsub('(.*, )|([.].*)', '', full_data$Name) 
+
+full_data %>%
+    group_by(Title, Sex) %>%
+    summarize(n = n()) %>%
+    arrange(Title)
+
+```
+Only few categories with more then 10 instances, which is why we throw them together. Also, a lot of categories describe the same, such as Miss and Ms. Therefore, merging several categories as well as gathering all rare ones in a separate category is done. 
+
+```{r, message = F, warning = F}
+full_data$Title[full_data$Title %in% c('Mlle', 'Ms')]  <- 'Miss'
+full_data$Title[full_data$Title == 'Mme']   <- 'Mrs'
+
+rare_titles  <- c('Capt', 'Col', 'Dona', 'Dr', 'Jonkheer', 'Lady', 'Major', 'Rev', 'Sir', 'the Countess', 'Don')
+full_data$Title[full_data$Title %in% rare_titles]  <- 'rare'
+
+full_data <- full_data %>% mutate_each(funs(factor), Title)
+
+
+full_data %>% group_by(Title) %>% summarise(prob = mean(as.integer(Survived), na.rm=T)) %>% print()
+```
+
+There are noticeable differences among the titles. Most noticeably, Miss and Mrs survived to a much higher rate, than Mr.  
+
+We could also investigate the size of families on the survival rate. However, there are a lot of unique surnames, which does not indicate a big influence of families or their sizes:
+
+```{r, message = F, warning = F}
+full_data$Surname <- full_data$Name %>%
+    gsub(',.*$','', .) 
+
+cat('Number of unique surnames: ',nlevels(factor(full_data$Surname)))
+```
+
+### Feature selection
+
+We do not apply proper feature selection as in applying significance tests for a model with the respective vs without. However, we delete variables, that very likely do not contribute greatly. For instance Cabine has186 categories with very few instances. ALso the PassengerId, the Name, the Ticket and Surname are disregarded for similar reasons. 
+
+```{r, message = F, warning = F}
+length(table(full_data$Cabin))
+
+full_data <- full_data %>%
+    select(-c(PassengerId, Name, Ticket, Cabin, Surname)) 
+head(full_data)
+```
+
+### Missing Value Imputation
+
+NA values are indesirable, as we either disregard the respective observations and thus decrease the amount of data drstically or have to complete the data artificially. It depends on the variables and amount of missing data. The necessity of Imputation can be assesed by comparing a models performance with and without Imputation. Looking at the amount of missing age and survival values, we decide to impute missing values. There exist quite a few techniques, such as inserting mean/median or predicted (e.g. linear regression on other variables) for numerical values or mode/most or also predicting the values with another classifier for the appearing instances for categorial variables.
+
+Mlr offers an easy way to compute imputation:
+
+```{r, message=FALSE, warning=FALSE}
+# Impute missing values by simple mean/mode imputation
+full_data_imp1 <- impute(
+  full_data,
+  classes = list(
+    factor = imputeMode(),
+    integer = imputeMean(),
+    numeric = imputeMean()
+  )
+)
+
+full_imp1 <- full_data_imp1$data
+
+```
+
+### Factor to dummy transformation
+
+Mlr requires one-hot encoded categorial variables. Therefore, for instance Sex is split up into two binary variables "male" and "female", which are either 0 or 1. This procedure increase the speed of the algorithms.
+
+```{r, message=FALSE, warning=FALSE}
+# with imputation
+full_data_imp_dummy <- createDummyFeatures(
+  full_imp1, 
+  cols = c(
+    "Pclass",
+    "Sex",
+    "Embarked", 
+    "Title",
+    "Parch",
+    "SibSp"
+  )
+)
+
+#summary(full_data_imp_dummy) 
+
+```
+
+Preprocessing is finished, which means we can split the dataset back to train and test based on the column data for the final Kaggle evaluation. For our purposes, we split the trainset 80/20 and evaluate on the 20% of test observations.   
+
+```{r, message=FALSE, warning=FALSE}
+# with imputation
+train <- full_data_imp_dummy %>%
+  filter(data == "train") %>%
+  select(-data)
+
+final_test <- full_data_imp_dummy %>%
+  filter(data == "test") %>%
+  select(-data)
+
+n = nrow(train)
+# usually 80% train is good 
+n_train = as.integer(0.8*n)
+set.seed(42)
+train_ids = sample(1:n, n_train)
+#length(train_ids)
+train_train = train[train_ids,]
+train_test  = train[-train_ids,]
+```
+
+
+## Fitting Logreg/ Decision Tree/ Random Forest/ XGBoost
+
+Mlr package requires a Task to be specified, which involves the train / test split. 
+
+```{r, message=FALSE, warning=FALSE}
+trainTask <- makeClassifTask(data = train_train, target = "Survived", positive = 1)
+testTask <- makeClassifTask(data = train_test, target = "Survived")
+# for Kaggle submission take entire trainset
+final_test <- makeClassifTask(data = final_test, target = "Survived")
+final_train <- makeClassifTask(data = train, target = "Survived")
+```
+
+
+### Logistic regression
+
+We start with a first baseline model, logistic regression.
+
+```{r, message=FALSE, warning=FALSE}
+logreg_learner = makeLearner("classif.logreg")
+# Train model
+logreg_model <- train(logreg_learner, task = trainTask)
+# Test model
+predictions <- predict(logreg_model, testTask)
+# our setup
+performance(predictions, measures = list(ppv, acc))
+# KAGGLE
+# retrain with full dataset
+logreg_model <- train(logreg_learner, final_train)
+final_predictions <- predict(logreg_model, final_test)
+# prediction file
+logreg_model_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+logreg_model_prediction$Survived = as.integer(logreg_model_prediction$Survived)-1
+write.csv(logreg_model_prediction,"logreg_prediction.csv", row.names=F)
+```
+Precision of 0.564 and accuracy of 0.687 (bad).
+To demonstrate the bad performance of logreg, we upload it to kaggle too. 
+Basic logistic regression yielded a Score of 0.70813, which is pretty low (rank 10183). Considering, this is the most basic classification model, it makes sense. 
+
+### Decision Tree
+
+The next baseline model, is an ordinary decision tree, also called cart. 
+
+```{r, message=FALSE, warning=FALSE}
+rpart_learner = makeLearner("classif.rpart")
+# Train model
+rpart_model <- train(rpart_learner, task = trainTask)
+# Test model
+predictions <- predict(rpart_model, testTask)
+final_predictions <- predict(rpart_model, final_test)
+# on our setup
+performance(predictions, measures = list(ppv, acc))
+
+# KAGGLE
+# retrain with full dataset
+rpart_model <- train(rpart_learner, final_train)
+final_predictions <- predict(rpart_model, final_test)
+# prediction file
+rpart_model_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+rpart_model_prediction$Survived = as.integer(rpart_model_prediction$Survived)-1
+write.csv(rpart_model_prediction,"rpart_prediction.csv", row.names=F)
+```
+This method yielded a much higher precision, as well as accuracy value. Even without parameter tuning or 
+tuning efforts, 75% of test data are assessed correctly. 
+
+KAGGLE: Decision Tree yielded a Score of 0.7799, which is already much better (rank 5053). Considering, decision trees are performing better, if there are a lot of categorial variables, this result also makes sense. 
+ 
+### Random Forest
+
+The next baseline model, is an extension to ordinary decision trees, called random Forest, which incorporates randomness in the sense that for splits not all variables can be used, but with a random chance a few are disregarded per split. Also, bagging is used in the sense that many of these trees are constructed to aggregate each trees decision to a global decision based on the majority vote of these trees.  
+
+```{r, message=FALSE, warning=FALSE}
+rforest_learner = makeLearner("classif.randomForest")
+# Train model
+rforest_model <- train(rforest_learner, task = trainTask)
+# Test model
+predictions <- predict(rforest_model, testTask)
+
+# average performance over 5 runs
+perf = list()
+for(i in 1:5){
+  set.seed(i)
+  rforest_model <- train(rforest_learner, task = trainTask)
+  predictions <- predict(rforest_model, testTask)
+  perf[i] <- list(performance(predictions, measures = list(ppv, acc)))
+}
+
+mean(as.numeric(unname(as.data.table(perf)[1,])))
+mean(as.numeric(unname(as.data.table(perf)[2,])))
+
+# KAGGLE
+# retrain with full dataset
+rforest_model <- train(rforest_learner, final_train)
+final_predictions <- predict(rforest_model, final_test)
+# prediction file
+rforest_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+rforest_prediction$Survived = as.integer(rforest_prediction$Survived)-1
+write.csv(rforest_prediction,"rforest_prediction.csv", row.names=F)
+
+```
+
+### XGBOOST
+Another advanced model is the so called XGboost classifier. 
+
+```{r, message=FALSE, warning=FALSE}
+xgb_learner = makeLearner("classif.xgboost")
+# Train model
+xgb_model <- train(xgb_learner, task = trainTask)
+
+predictions <- predict(xgb_model, testTask)
+final_predictions <- predict(xgb_model, final_test)
+
+# prediction file
+xgboost_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+xgboost_prediction$Survived = as.integer(xgboost_prediction$Survived)-1
+write.csv(xgboost_prediction,"xgboost_prediction.csv", row.names=F)
+
+perf = list()
+for(i in 1:5){
+  set.seed(i)
+  xgb_model <- train(xgb_learner, task = trainTask)
+  predictions <- predict(xgb_model, testTask)
+  perf[i] <- list(performance(predictions, measures = list(ppv, acc)))
+}
+
+mean(as.numeric(unname(as.data.table(perf)[1,])))
+mean(as.numeric(unname(as.data.table(perf)[2,])))
+
+# KAGGLE
+# Re-train parameters using tuned hyperparameters (and full training set)
+xgb_model <- train(xgb_learner, final_train)
+final_predictions <- predict(xgb_model, final_test)
+
+# prediction file
+xgboost_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+xgboost_prediction$Survived = as.integer(xgboost_prediction$Survived)-1
+write.csv(xgboost_prediction,"xgboost_prediction.csv", row.names=F)
+```
+
+
+## Hyper-parameter Tuning
+First, the Random Forest classifier is tuned over the number of trees created, number of variables sampled as candidates each split 
+
+```{r, message=FALSE, warning=FALSE}
+# To see all the parameters of the xgboost classifier
+getParamSet("classif.randomForest")
+
+rforest_params <- makeParamSet(
+  # The number of trees in the model (each one built sequentially)
+  makeIntegerParam("ntree", lower = 100, upper = 1000),
+  # number of splits in each tree
+  makeIntegerParam("mtry", lower = 1, upper = 10)
+)
+
+control <- makeTuneControlRandom(maxit = 1)
+
+# Resampling plan
+resample_desc <- makeResampleDesc("CV", iters = 4)
+
+tuned_params <- tuneParams(
+  learner = rforest_learner,
+  task = trainTask,
+  resampling = resample_desc,
+  par.set = rforest_params,
+  control = control
+)
+
+# Create a new model using tuned hyperparameters
+rforest_tuned_learner <- setHyperPars(
+  learner = rforest_learner,
+  par.vals = tuned_params$x
+)
+
+# Make a new prediction
+perf = list()
+for(i in 1:5){
+  set.seed(i)
+  rforest_model <- train(rforest_tuned_learner, task = trainTask)
+  predictions <- predict(rforest_model, testTask)
+  perf[i] <- list(performance(predictions, measures = list(ppv, acc)))
+}
+
+mean(as.numeric(unname(as.data.table(perf)[1,])))
+mean(as.numeric(unname(as.data.table(perf)[2,])))
+
+# KAGGLE
+# retrain with full dataset
+rforest_model <- train(rforest_tuned_learner, final_train)
+final_predictions <- predict(rforest_model, final_test)
+# prediction file
+rforest_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+rforest_prediction$Survived = as.integer(rforest_prediction$Survived)-1
+
+write.csv(rforest_prediction,"rforest_tuned_prediction.csv", row.names=F)
+
+```
+
+Parameter tuning also for xgboost classififer. 
+
+```{r, message=FALSE, warning=FALSE}
+# To see all the parameters of the xgboost classifier
+getParamSet("classif.xgboost")
+# We followed the standard parameter tuning procedure as shown in 
+# the tutorial site of the mlr package
+xgb_params <- makeParamSet(
+  # The number of trees in the model (each one built sequentially)
+  makeIntegerParam("nrounds", lower = 100, upper = 500),
+  # number of splits in each tree
+  makeIntegerParam("max_depth", lower = 1, upper = 10),
+  # "shrinkage": counteracts overfitting
+  makeNumericParam("eta", lower = .1, upper = .5),
+  # L2 regularization also counteracts overfitting
+  makeNumericParam("lambda", lower = -1, upper = 0, trafo = function(x) 10^x)
+)
+
+control <- makeTuneControlRandom(maxit = 1)
+
+# resampling
+resample_desc <- makeResampleDesc("CV", iters = 4)
+
+tuned_params <- tuneParams(
+  learner = xgb_learner,
+  task = trainTask,
+  resampling = resample_desc,
+  par.set = xgb_params,
+  control = control
+)
+
+# Create a new model using tuned hyperparameters
+xgb_tuned_learner <- setHyperPars(
+  learner = xgb_learner,
+  par.vals = tuned_params$x
+)
+
+# Make new predictions over 5 runs
+perf = list()
+for(i in 1:5){
+  set.seed(i)
+  xgb_model <- train(xgb_tuned_learner, task = trainTask)
+  predictions <- predict(xgb_model, testTask)
+  perf[i] <- list(performance(predictions, measures = list(ppv, acc)))
+}
+
+mean(as.numeric(unname(as.data.table(perf)[1,])))
+mean(as.numeric(unname(as.data.table(perf)[2,])))
+
+# KAGGLE
+# Re-train parameters using tuned hyperparameters (and full training set)
+xgb_model <- train(xgb_tuned_learner, final_train)
+final_predictions <- predict(xgb_model, final_test)
+
+# prediction file
+xgboost_prediction <- final_predictions$data %>%
+  select(PassengerID = id, Survived = response) %>%
+  mutate(PassengerID = test_raw$PassengerId)
+
+xgboost_prediction$Survived = as.integer(xgboost_prediction$Survived)-1
+write.csv(xgboost_prediction,"xgboost_tuned_prediction.csv", row.names=F)
+```
+
+

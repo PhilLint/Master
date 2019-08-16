@@ -1,0 +1,237 @@
+---
+title: "R Markdown Report on Assignment 1"
+subtitle: Basic Version
+authors: Frederic Chamot, Luisa Ebner, Philipp Lintl
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Task 3B
+
+## MSE-MAE equality Plot
+
+```{r}
+# Data generation
+e  <- seq(-3, 3, 0.05)
+mse <- (e)^2
+mae <- abs(e)
+df <- data.frame(e,mse,mae)
+
+# Plot
+require(ggplot2)
+
+p = ggplot() + 
+  geom_line(data = df, aes(x = e, y = mse), size = 1.2,  color = "blue") +
+  geom_line(data = df, aes(x = e, y = mae), size = 1.2, color = "red") +
+  xlab('e_j') + ylab("e^2 / |e|") + ylim(0,5) + 
+  ggtitle("Squared versus absolute error values") + theme_grey(base_size = 22) + geom_point(aes(x = 0, y = 0), size = 3) + 
+  geom_point(aes(x = -1, y = 1), size = 3) + geom_point(aes(x = 1, y = 1), size = 3)
+
+
+print(p)
+```
+
+
+
+
+
+
+## Measurement of MSE and MAE as evaluation of different regression methods
+
+```{r}
+library(mlbench)
+
+# Loading the data set
+data(BostonHousing)
+
+head(BostonHousing)
+str(BostonHousing)
+```
+
+
+
+```{r}
+# Missing values?
+
+length(BostonHousing[is.na(BostonHousing) == TRUE])
+
+# -> The dataset is complete, no missing values.
+```
+```{r}
+# Exploratory Data Analysis/ relations of features to target
+target = BostonHousing$medv
+par(mfrow = c(1, 2))
+hist(target, main = "Histogram of median house prices", xlab = "Median value of homes in $1000s")
+qqnorm(target)
+
+# -> widely approximates a Gaussian distribution (surplus towards lower price values!)
+
+```
+
+```{r}
+
+# Split of data into training and testing set by 80-20
+
+index <- sample(nrow(BostonHousing),nrow(BostonHousing)*0.80)
+train <- BostonHousing[index,]
+test <- BostonHousing[-index,]
+
+
+X.train <- BostonHousing[index, -grep("medv",colnames(BostonHousing))]
+Y.train <- BostonHousing[index, "medv"]
+
+X.test <- BostonHousing[-index, -grep("medv",colnames(BostonHousing))]
+Y.test <- BostonHousing[-index, "medv"]
+```
+
+```{r}
+# Model Building
+
+# install.packages("MASS")
+library(MASS)
+
+# variable selection
+# 1. step up method/ forward selection
+
+# Stept 1: select variable with highest R^2 in simple regression model ( crim (R^2 = 0.154),  zn (R^2 = 0.181),  indus (R^2 = 0.263),  chas (R^2 = 0.0385), nox (R^2 = 0.2118), rm  (R^2 = 0.4672), age (R^2 = 0.1867), dis (R^2 = 0.08308), rad (R^2 = 0.1522), tax (R^2 =0.2315), ptratio (R^2 =0.2614), b (R^2 =0.1136), lstat (R^2 =0.56))
+
+# ->lstat: Percentage of lower status of the population is most explanatory according to R^2
+model_step_1 <- lm(medv ~ lstat, train)
+
+# Step 2: the addition of thr number of rooms variable rm most increases the R^2 (to 0.639) 
+model_step_2 <- lm(medv ~ lstat + rm, train)
+
+
+# Step 3: adding the factor variable chas is the significant feature that most increases the R^2
+model_step_3 <- lm(medv ~ lstat + rm + chas, train)
+
+# Step 4: add b (significant and greatest R^2 increase)
+model_step_4 <- lm(medv ~ lstat + rm + chas + b, train)
+
+# Step 5: add dis
+model_step_5 <- lm(medv ~ lstat + rm + chas + b + dis, train)
+
+
+# Step 6: add zn
+model_step_6 <- lm(medv ~ lstat + rm + chas + b + dis + zn, train)
+
+# Step 7: add nox
+model_step_7 <- lm(medv ~ lstat + rm + chas + b + dis + zn + nox , train)
+
+
+# Step 8: add ptratio
+model_step_8 <- lm(medv ~ lstat + rm + chas + b + dis + zn + nox + ptratio , train)
+
+
+# Step 9: add rad
+model_step_9 <- lm(medv ~ lstat + rm + chas + b + dis + zn + nox + ptratio + rad , train)
+
+# Step 10: add crim
+model_step_10 <- lm(medv ~ lstat + rm + chas + b + dis + zn + nox + ptratio + rad + crim , train)
+
+
+# Step 11: add tax
+model_step_11 <- lm(medv ~ lstat + rm + chas + b + dis + zn + nox + ptratio + rad + crim + tax, train)
+
+# -> no more significant features: End 
+
+step_up_model = model_step_11
+
+```
+
+```{r}
+
+# 2. step down method / backward elimination
+
+model_2 <- lm(medv ~., train)
+step(model_2, direction = "backward")
+
+step_down_model = lm(medv ~ crim + zn + chas + nox + rm + dis + rad + 
+    tax + ptratio + b + lstat, data = train)
+
+# -> step up and step down method result in the same linear regression model
+```
+
+```{r}
+## Model diagnostics
+# model errors in DataFrame format
+step_res <- as.data.frame(residuals(step_down_model))
+
+# normal error distribution? -MSE?
+par(mfrow = c(1, 2))
+hist(step_res[, 1], main = "histogram of model residuals", xlab = "residuals")
+qqnorm(step_res[, 1])
+
+# -> approximately normally distributed errors around 0 
+```
+
+
+```{r}
+## Model prediction
+
+Y.predict.step = predict(step_down_model, as.data.frame(X.test))
+Y.predict.step
+```
+
+```{r}
+## Model evaluation
+
+# MSE
+mse.step = mean(sum((Y.predict.step - Y.test)^2))
+mse.step
+
+#MSE(step_down_model)
+
+# MAE
+
+mae.step = mean(sum(abs(Y.predict.step - Y.test)))
+mae.step
+
+#MAE(step_down_model)
+
+```
+
+```{r}
+# Alternative: Regression model with LASSO method
+# # References: https://web.stanford.edu/~hastie/glmnet/glmnet_alpha.html
+
+# installing the glm net package
+#install.packages("glmnet")
+library(glmnet)
+
+# variables and data initialisation
+#fit model
+lasso.fit<- glmnet(x=data.matrix(X.train), y=Y.train, family = "gaussian", alpha = 1)
+
+
+# cross-validation to find appropriate lambda value 
+cv.lasso <- cv.glmnet(x=data.matrix(X.train), y=Y.train, family = "gaussian", alpha = 1, nfolds = 10)
+
+cv.lasso$lambda.min
+cv.lasso$lambda.1se
+
+coef(lasso.fit, s=cv.lasso$lambda.1se)
+coef(lasso.fit, s=cv.lasso$lambda.min)
+
+# We will select lamd.1se for a less complex model (less features)
+# LASSO included crim, zn, chas, nox, rm, dis, rad, ptratio, black, lstat as feature variables
+
+# Final model with lambda.1se
+lasso.model <- glmnet(x=data.matrix(X.train), y=Y.train, family = "gaussian",alpha = 1,
+                      lambda = cv.lasso$lambda.1se)
+
+# model prediction
+Y.predict = predict(lasso.fit, newx = data.matrix(X.test), s=cv.lasso$lambda.1se)
+
+# Model evaluation
+# MSE
+mse.lasso = mean(sum((Y.predict - Y.test)^2))
+mse.lasso
+# MAE
+mae.lasso = mean(sum(abs(Y.predict - Y.test)))
+mae.lasso
+
+```

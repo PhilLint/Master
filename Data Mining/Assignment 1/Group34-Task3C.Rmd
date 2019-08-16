@@ -1,0 +1,216 @@
+---
+title: "DM-Group34-tsak4"
+author: "PL LE F"
+date: "19 April 2019"
+output: html_document
+---
+
+
+```{r}
+library(tm)
+library(NLP)
+library(RColorBrewer)
+library(e1071)
+library(stopwords)
+library(corpus)   
+library(readr)
+library(data.table)
+library(stringr)
+library(mlr)
+
+```
+
+In the following, we delete special chracters, signs of punctuation, numbers, set every letter to lower, delete stopweords from a stopwordlist and create a stemmed document term matrix additional to the normal one. 
+
+```{r}
+sms <- read_csv2("./SmsCollection.csv", col_names = TRUE)
+sms <- as.data.table(sms)
+
+# object for further text analyses, to be reconnected with original table
+sms[, text := str_replace_all(sms[, text], "[^a-zA-ZäöüÄÖÜ]", " " )]
+
+text_data = sms
+# names are required for corpusfunction
+# corpus creation
+text_data[, doc_id := row.names(text_data)]
+
+corpus <- VCorpus(DataframeSource(as.data.frame(text_data)))
+  
+# storing of metainformation still to be tested
+# corpus <- VCorpus(DataframeSource(as.data.frame(text_data)),
+#                  readerControl = list(reader = reader(DataframeSource(as.data.frame(text_data)))))
+  
+docs <- corpus
+  
+# deletes remaining punctuation
+docs <- tm_map(docs,removePunctuation)
+  
+# deletes remaining numbers
+docs <- tm_map(docs, removeNumbers)  
+  
+# all to lower letters
+docs <- tm_map(docs, tolower)
+  
+# remove stopwords by language
+docs <- tm_map(docs, removeWords, stopwords::stopwords(language = "en",
+                                                         source = "stopwords-iso")) 
+  
+
+# deletes spaces
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs, PlainTextDocument)
+
+# creates stemmed corpus
+docs_stem <- tm_map(docs, content_transformer(function(txt) {
+  paste(stemDocument(strsplit(txt, " ")[[1]],
+                       language = "en"), collapse =
+            " ")
+  }))
+  
+texts = data.frame(text=unlist(sapply(docs, `[`, "content")), 
+                                  stringsAsFactors=F)
+texts$doc_id = text_data$doc_id
+    
+corpus <- docs 
+  
+# names are taken to guarantee matching to original documents
+names(docs) <- text_data$doc_id
+names(docs_stem) <- text_data$doc_id
+
+# dataformat: document term matrix   
+dtm <- DocumentTermMatrix(docs)
+dtm_stem <- DocumentTermMatrix(docs_stem)
+
+logical_frame = as.data.frame(matrix(ncol = 2,
+                                     nrow = nrow(text_data)))
+colnames(logical_frame) = c("ham", "spam")
+
+for(i in 1:nrow(text_data)){
+  if(text_data[i,]$label=="ham"){
+    logical_frame[i,1] = 1
+    logical_frame[i,2] = 0
+  }else{
+    logical_frame[i,1] = 0
+    logical_frame[i,2] = 1
+  }
+}
+#logical_frame[1:10,]
+rownames(logical_frame) = text_data$doc_id
+
+# DTM (bzw. Feature Matrix) zusammenfuegen mit binaeren Labels
+total_dtm = cbind(dtm, text_data$label)
+
+total_dtm_stem = cbind(dtm_stem, text_data$label)
+names(total_dtm_stem)[6626] = "label"
+
+names(total_dtm) = make.names(names(total_dtm))
+
+total_dtm = as.data.frame(as.matrix(total_dtm))
+total_task = mlr::makeClassifTask(data = total_dtm, target = "label")
+
+total_dtm_stem = as.data.frame(as.matrix(total_dtm_stem))
+names(total_dtm_stem)[5546] = "label"
+names(total_dtm_stem) = make.names(names(total_dtm_stem))
+
+
+total_task_stem = mlr::makeClassifTask(data = total_dtm_stem, target = "label")
+lrn.nbayes = makeLearner("classif.naiveBayes")
+
+number_obs = total_task$task.desc$size
+n_class = length(total_task$task.desc$target)
+labels = total_task$task.desc$target
+
+n_train = 0.8 * number_obs
+set.seed(42)  
+train_ids = sample(1:number_obs, n_train)
+
+mod = train(lrn.nbayes, total_task, subset = train_ids)
+# predict on test data (ids that are not in train data)
+pred = predict(mod, total_task, subset = setdiff(1:number_obs, train_ids))
+performance(pred, measures = list(mmce, acc, ppv))
+
+mod_stem = train(lrn.nbayes, total_task_stem, subset = train_ids)
+# predict on test data (ids that are not in train data)
+pred_stem = predict(mod_stem, total_task_stem, subset = setdiff(1:number_obs, train_ids))
+performance(pred_stem, measures = list(mmce, acc, ppv))
+
+```
+
+Now, we take a quick look at the descriptive aspects of this dataset. 
+
+
+```{r}
+ggplot(aes(x=label),data=sms) + geom_bar(width=0.25)
+table(sms$label)
+```
+
+
+To compare wordclouds of ham and spam, we separately get two dtms, one for ham one for spam. 
+```{r}
+#----
+ham_corpus <- VCorpus(DataframeSource(as.data.frame(text_data[text_data$label=="ham",])))
+
+docs <- ham_corpus
+# deletes remaining punctuation
+docs <- tm_map(docs,removePunctuation)
+# deletes remaining numbers
+docs <- tm_map(docs, removeNumbers) 
+# all to lower letters
+docs <- tm_map(docs, tolower)
+# remove stopwords by language
+docs <- tm_map(docs, removeWords, stopwords::stopwords(language = "en",
+                                                         source = "stopwords-iso"))
+
+ham_dtm = docs
+# deletes spaces
+ham_dtm <- tm_map(ham_dtm, stripWhitespace)
+ham_dtm <- tm_map(ham_dtm, PlainTextDocument)
+
+names(ham_dtm) <- text_data[text_data$label=="ham",]$doc_id
+ham_dtm = tm:: DocumentTermMatrix(ham_dtm)
+
+#-----
+spam_corpus <- VCorpus(DataframeSource(as.data.frame(text_data[text_data$label=="spam",])))
+
+docs <- spam_corpus
+# deletes remaining punctuation
+docs <- tm_map(docs,removePunctuation)
+# deletes remaining numbers
+docs <- tm_map(docs, removeNumbers) 
+# all to lower letters
+docs <- tm_map(docs, tolower)
+# remove stopwords by language
+docs <- tm_map(docs, removeWords, stopwords::stopwords(language = "en",
+                                                         source = "stopwords-iso"))
+# deletes spaces
+spam_dtm = docs
+
+spam_dtm <- tm_map(spam_dtm, stripWhitespace)
+spam_dtm <- tm_map(spam_dtm, PlainTextDocument)
+spam_dtm = DocumentTermMatrix(spam_dtm)
+
+#----
+
+# Calculate the rowSums: term_frequency
+ham_term_frequency <- sort(slam::col_sums(ham_dtm, na.rm = T), decreasing = TRUE)
+
+# for frequency plot
+ham_freq_table <- data.table(wort = attr(ham_term_frequency, "names"),
+                           frequency = as.vector(ham_term_frequency))
+
+wordcloud(ham_freq_table$wort, ham_freq_table$frequency, max.words = 50, colors = "darkgreen")
+
+ham_clod
+# Calculate the rowSums: term_frequency
+spam_term_frequency <- sort(slam::col_sums(spam_dtm, na.rm = T), decreasing = TRUE)
+
+# for frequency plot
+spam_freq_table <- data.table(wort = attr(spam_term_frequency, "names"),
+                           frequency = as.vector(spam_term_frequency))
+
+wordcloud(spam_freq_table$wort, spam_freq_table$frequency, max.words = 50, colors = "salmon")
+?wordcloud
+
+
+
+````
