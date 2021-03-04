@@ -20,9 +20,18 @@ Was done in as a group project between me and [Luisa Ebner](https://github.com/L
 
 The Github Repository for the second Learning to Rank Assignment [Report](https://github.com/PhilLint/Master/blob/master/Data%20Mining/Assignment%202/Assignment%202%20group%2034.pdf) is found [here](https://github.com/PhilLint/Expedia-Ranking-Competition). 
 
+## Machine Learning 2
+The [Repo](https://github.com/PhilLint/ML2) contains theoretical assignments as well as implementations in python notebooks focussing on Bayesian Statistics, Bayesian Networks and Autoencoders. 
+
+## Reinforcement Learning
+The [Repo](https://github.com/PhilLint/RL) shows our coursework for Reinforcement Learning. 
+
+## Computer Vision 2
+This course was an exciting mix of implementing traditional Computer Vision approaches while at the same time discussing state of the aret papers in paper reading rounds. The latter and especially corresponding discussions broadened our scope on what's currently happening, which directions are hot topics and which CV topics are milestones in their own right. [Repo](https://github.com/PhilLint/CV2).
+
 ## Copyright
 
-Copyright © 2019 Philipp Lintl
+Copyright © 2021 Philipp Lintl
 
 <p align=“justify”>
 This project is distributed under the <a href="LICENSE">MIT license</a>.  
